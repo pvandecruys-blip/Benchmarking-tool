@@ -1,0 +1,26 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Virtual environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Project data and uploads (avoid pushing gigabytes of PDFs and PPTXs to Github)
+data/
+uploads/
+outputs/
+chromadb/
+
+# OS specific files
+.DS_Store
+Thumbs.db

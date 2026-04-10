@@ -1,0 +1,35 @@
+# node.js
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# SourceLens specific
+backend/data/
+backend/uploads/
+backend/outputs/
+backend/chromadb/
+test_files/
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
