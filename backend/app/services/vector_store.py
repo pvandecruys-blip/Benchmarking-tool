@@ -5,10 +5,76 @@ Manages document chunk embeddings using ChromaDB (with numpy fallback).
 
 import logging
 import hashlib
+import re
 from typing import Optional
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
+
+
+def _extract_numeric_tokens(*texts: str) -> list[str]:
+    """Pull numeric tokens (percentages, currency figures, durations) from text.
+
+    Captures digits with optional decimal/thousands separators. Does not keep
+    units — those are handled by embeddings. Deduplicated, stable order.
+    """
+    seen = set()
+    tokens: list[str] = []
+    for t in texts:
+        if not t:
+            continue
+        for match in _NUMBER_RE.findall(t):
+            normalized = match.replace(",", "")
+            if len(normalized) < 1:
+                continue
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            tokens.append(match)
+    return tokens
+
+
+def hybrid_rerank(
+    chunks: list[dict],
+    metric_value: str,
+    metric_description: str,
+    context_sentence: str,
+    n_results: int,
+) -> list[dict]:
+    """Re-rank vector-retrieved chunks by combining cosine distance with a
+    keyword boost for chunks containing the metric's numeric tokens.
+
+    Scoring (higher = better):
+      base   = 1.0 - distance       (ChromaDB returns 1-cosine)
+      boost  = 0.30 per numeric token from the metric that appears in the chunk
+      final  = base + boost
+    """
+    if not chunks:
+        return []
+
+    tokens = _extract_numeric_tokens(metric_value, metric_description, context_sentence)
+
+    for chunk in chunks:
+        text = chunk.get("text", "") or ""
+        distance = float(chunk.get("distance", 0.5))
+        base = max(0.0, 1.0 - distance)
+
+        boost = 0.0
+        if tokens:
+            for tok in tokens:
+                normalized_tok = tok.replace(",", "")
+                if re.search(rf"\b{re.escape(normalized_tok)}\b", text):
+                    boost += 0.30
+                elif tok in text:
+                    boost += 0.15
+        chunk["_hybrid_score"] = base + boost
+        chunk["_keyword_matches"] = boost
+
+    chunks.sort(key=lambda c: c.get("_hybrid_score", 0.0), reverse=True)
+    return chunks[:n_results]
 
 # Global store instance
 _store = None

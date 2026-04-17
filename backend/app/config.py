@@ -14,20 +14,24 @@ class Settings(BaseSettings):
 
     # API Keys
     openai_api_key: str = Field(default="", env="OPENAI_API_KEY")
+    openai_base_url: str = Field(default="", env="OPENAI_BASE_URL")
     google_api_key: str = Field(default="", env="GOOGLE_API_KEY")
+    anthropic_api_key: str = Field(default="", env="ANTHROPIC_API_KEY")
+    anthropic_base_url: str = Field(default="", env="ANTHROPIC_BASE_URL")
 
     # LLM Configuration
-    llm_provider: str = Field(default="gemini", env="LLM_PROVIDER")
-    llm_model: str = Field(default="gemini-3.1-flash-lite", env="LLM_MODEL")
-    embedding_model: str = Field(default="models/text-embedding-004", env="EMBEDDING_MODEL")
+    llm_provider: str = Field(default="anthropic", env="LLM_PROVIDER")
+    llm_model: str = Field(default="claude-sonnet-4-6", env="LLM_MODEL")
+    embedding_model: str = Field(default="azure.text-embedding-3-large", env="EMBEDDING_MODEL")
 
     # Demo mode (generates realistic mock data without API key)
     demo_mode: bool = Field(default=False, env="DEMO_MODE")
 
     # Processing Configuration
-    chunk_size: int = Field(default=800, env="CHUNK_SIZE")
-    chunk_overlap: int = Field(default=200, env="CHUNK_OVERLAP")
-    max_chunks_per_query: int = Field(default=8, env="MAX_CHUNKS_PER_QUERY")
+    chunk_size: int = Field(default=400, env="CHUNK_SIZE")
+    chunk_overlap: int = Field(default=100, env="CHUNK_OVERLAP")
+    max_chunks_per_query: int = Field(default=12, env="MAX_CHUNKS_PER_QUERY")
+    retrieval_overfetch_factor: int = Field(default=3, env="RETRIEVAL_OVERFETCH_FACTOR")
     verification_strictness: str = Field(default="standard", env="VERIFICATION_STRICTNESS")  # lenient, standard, strict
 
     # File Limits

@@ -44,9 +44,9 @@ Return as a JSON array. Be exhaustive — miss nothing.
 If no metrics are found on this slide, return an empty array: []"""
 
 
-VERIFICATION_PROMPT = """You are a meticulous fact-checking auditor for a management consulting firm.
-Your task is to verify whether a specific metric from a client presentation is
-supported by the provided source document excerpts.
+VERIFICATION_PROMPT = """You are a pragmatic fact-checking auditor for a management consulting firm.
+Your job: decide whether the SAME underlying fact appears in the source
+excerpts, even if the slide formats or expresses it differently.
 
 METRIC TO VERIFY:
 - Value: {metric_value}
@@ -57,43 +57,75 @@ METRIC TO VERIFY:
 SOURCE DOCUMENT EXCERPTS (ranked by relevance):
 {source_excerpts}
 
-VERIFICATION TASKS:
+═══════════════════════════════════════════════════════════════════════════
+CORE PRINCIPLE — READ THIS FIRST
+═══════════════════════════════════════════════════════════════════════════
+Consulting slides REFORMAT data from their sources. Your goal is to find the
+underlying fact, NOT to demand verbatim numeric equality. Two expressions of
+the same fact = VERIFIED, not partially_verified.
 
-1. **MATCH ASSESSMENT**: Does any source excerpt contain or directly support
-   this exact metric value? Consider:
+The following pairs are ALL fully VERIFIED matches (status = "verified"):
+- Slide: "33%"                 Source: "one-third" / "a third of" / "~33%"
+- Slide: "30-40%"              Source: "between 30 and 40 percent" / "33%" / "35%"
+- Slide: "$8M-$12M"            Source: "approximately ten million dollars" / "around $10M"
+- Slide: "90-131 days"         Source: "median closure time of 110 days" / "3-4 months"
+- Slide: "reduced by 50%"      Source: "cut in half" / "halved" / "dropped from 200 to 100"
+- Slide: "top quartile"        Source: "75th percentile performers" / "upper 25%"
+- Slide: "208 sites"           Source: "over 200 sites" / "a global footprint of 208 facilities"
+- Slide: "5-10 days → 1-3 days"  Source: a before/after reduction described in words
+- Slide: "1/6th of median"     Source: "approximately 17%" / "roughly one-sixth"
+- Slide rounds 34.7% → "~35%"  Source: "34.7%"   → VERIFIED (rounding is normal)
+
+Only use PARTIALLY_VERIFIED when the source discusses the same topic/metric
+type but the specific numeric claim cannot be reconciled even via rounding,
+ranges, or unit conversion.
+
+Only use CONTRADICTED when the source states a clearly different value for
+the same metric (e.g., slide says "30%", source says "15%" — not a rounding
+difference).
+
+═══════════════════════════════════════════════════════════════════════════
+VERIFICATION TASKS
+═══════════════════════════════════════════════════════════════════════════
+
+1. **MATCH ASSESSMENT** — Apply the principle above. Accept any of:
    - Exact numerical match
-   - Equivalent expressions (e.g., "one-sixth" = "1/6th" = "~83% reduction")
-   - Ranges that encompass the stated value
-   - Rounded or aggregated versions of the same data
+   - Equivalent fractions / decimals / percentages (one-third ↔ 33%)
+   - Ranges that encompass a point value, or point values inside a range
+   - Rounded, approximated, or truncated versions (±10% tolerance is fine)
+   - Unit conversions (days ↔ months, $M ↔ million)
+   - Before/after pairs described narratively
+   - Aggregate totals (208 sites = 52 countries × average sites/country)
 
-2. **EXACT QUOTE**: Copy the most relevant verbatim passage from the source
-   that supports (or contradicts) this metric. If no match, state "No
-   supporting passage found."
+2. **EXACT QUOTE** — Copy the most relevant verbatim passage from the source.
+   Must be a literal substring of one of the excerpts, not a paraphrase. If
+   nothing matches, state "No supporting passage found."
 
-3. **CITATION CHAIN**: If the source document itself cites an underlying
-   source for this metric (e.g., the text says "according to McKinsey POBOS
-   [ref 1]" or "data from MDIC pilot study [9]"):
-   - Identify the intermediate source (the document you're reading)
-   - Identify the reference ID used (e.g., "[9]", "ref [1]")
-   - Identify the ultimate/original source being cited
+3. **CITATION CHAIN** — If the source text itself cites an underlying source
+   (e.g., "according to McKinsey POBOS [ref 1]", "data from MDIC [9]"):
+   - intermediate_source: the document you're reading
+   - intermediate_ref_id: the reference marker (e.g., "[9]")
+   - ultimate_source: the original source cited
+   - ultimate_source_type: categorize it
 
-4. **DISCREPANCY CHECK**: Is the metric on the slide an accurate
-   representation of what the source says? Flag if:
-   - The number has been rounded or approximated beyond reasonable tolerance
-   - The metric has been taken out of context
-   - The source actually states something different
+4. **DISCREPANCY CHECK** — Only flag actual problems:
+   - Source states a genuinely different number (not just rounding)
+   - Metric taken out of context (different population, different period)
+   - Slide claims stronger evidence than the source supports
 
-5. **VERIFICATION STATUS**: Assign one of:
-   - VERIFIED: Exact or near-exact match found in source with clear support
-   - PARTIALLY_VERIFIED: The metric is directionally supported but not
-     precisely matched
-   - UNVERIFIED: Cannot find this metric in any provided source document
-   - CONTRADICTED: Source document contains data that contradicts this metric
-   - NOT_FOUND: The metric type is present in sources but the specific value
-     cannot be located
+5. **VERIFICATION STATUS** — Be decisive. Default to VERIFIED when the
+   underlying fact is present:
+   - VERIFIED: Same underlying fact is in the source (even if formatted
+     differently). This is the MOST COMMON outcome when sources are relevant.
+   - PARTIALLY_VERIFIED: Source discusses the same metric type but specific
+     value cannot be reconciled. Use sparingly.
+   - UNVERIFIED: Source excerpts do not discuss this metric at all.
+   - CONTRADICTED: Source clearly states a different value for the same
+     metric (beyond rounding tolerance).
+   - NOT_FOUND: Metric type absent from all excerpts.
 
-6. **CONFIDENCE SCORE**: 0.0 to 1.0 reflecting your confidence in the
-   verification
+6. **CONFIDENCE SCORE** — 0.0 to 1.0. Use ≥0.8 when you're clearly right,
+   0.5-0.8 for good-but-not-certain matches, <0.5 when you're uncertain.
 
 Return ONLY valid JSON (no markdown, no code blocks):
 {{
@@ -111,8 +143,8 @@ Return ONLY valid JSON (no markdown, no code blocks):
     "ultimate_source": "the original source cited or null",
     "ultimate_source_type": "peer_reviewed | industry_report | consultancy_publication | regulatory_document | news_article | conference_paper | company_publication | unknown"
   }},
-  "discrepancies": "string describing any issues, or null",
-  "reasoning": "2-4 sentence explanation of your verification logic"
+  "discrepancies": "string describing any real issues, or null",
+  "reasoning": "2-4 sentences — state WHY the slide value and source passage describe the same fact (e.g., 'Source says one-third; slide rounds to 33%. Same fact.')"
 }}"""
 
 

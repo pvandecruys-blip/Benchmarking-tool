@@ -18,11 +18,21 @@ logger = logging.getLogger(__name__)
 # Provider constants
 PROVIDER_GEMINI = "gemini"
 PROVIDER_OPENAI = "openai"
+PROVIDER_ANTHROPIC = "anthropic"
 
 # Model catalog
 MODEL_CATALOG = {
+    # Anthropic models — PwC GenAI gateway (prefixed routing via Bedrock/Vertex)
+    "bedrock.anthropic.claude-sonnet-4-6": {"provider": PROVIDER_ANTHROPIC, "api_name": "bedrock.anthropic.claude-sonnet-4-6", "label": "Claude Sonnet 4.6 (Bedrock)", "cost_tier": "balanced"},
+    "bedrock.anthropic.claude-opus-4-6": {"provider": PROVIDER_ANTHROPIC, "api_name": "bedrock.anthropic.claude-opus-4-6", "label": "Claude Opus 4.6 (Bedrock)", "cost_tier": "premium"},
+    "bedrock.anthropic.claude-haiku-4-5": {"provider": PROVIDER_ANTHROPIC, "api_name": "bedrock.anthropic.claude-haiku-4-5", "label": "Claude Haiku 4.5 (Bedrock)", "cost_tier": "budget"},
+    "vertex_ai.anthropic.claude-sonnet-4-6": {"provider": PROVIDER_ANTHROPIC, "api_name": "vertex_ai.anthropic.claude-sonnet-4-6", "label": "Claude Sonnet 4.6 (Vertex)", "cost_tier": "balanced"},
+    # Direct Anthropic names (for standard api.anthropic.com usage)
+    "claude-sonnet-4-6": {"provider": PROVIDER_ANTHROPIC, "api_name": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6", "cost_tier": "balanced"},
+    "claude-opus-4-7": {"provider": PROVIDER_ANTHROPIC, "api_name": "claude-opus-4-7", "label": "Claude Opus 4.7", "cost_tier": "premium"},
+    "claude-haiku-4-5": {"provider": PROVIDER_ANTHROPIC, "api_name": "claude-haiku-4-5", "label": "Claude Haiku 4.5", "cost_tier": "budget"},
     # Gemini models
-    "gemini-3.1-flash-lite": {"provider": PROVIDER_GEMINI, "api_name": "gemini-3.1-flash-lite-preview", "label": "Gemini 3.1 Flash Lite (Recommended)", "cost_tier": "budget"},
+    "gemini-3.1-flash-lite": {"provider": PROVIDER_GEMINI, "api_name": "gemini-3.1-flash-lite-preview", "label": "Gemini 3.1 Flash Lite", "cost_tier": "budget"},
     "gemini-2.5-flash": {"provider": PROVIDER_GEMINI, "api_name": "gemini-2.5-flash-preview-04-17", "label": "Gemini 2.5 Flash", "cost_tier": "budget"},
     "gemini-2.0-flash": {"provider": PROVIDER_GEMINI, "api_name": "gemini-2.0-flash", "label": "Gemini 2.0 Flash", "cost_tier": "budget"},
     # OpenAI models
@@ -31,18 +41,20 @@ MODEL_CATALOG = {
     "gpt-4.1-mini": {"provider": PROVIDER_OPENAI, "api_name": "gpt-4.1-mini", "label": "GPT-4.1 Mini", "cost_tier": "budget"},
 }
 
-DEFAULT_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_MODEL = "claude-sonnet-4-6"
 
 
 def get_provider_for_model(model: str) -> str:
     """Determine which provider a model belongs to."""
     if model in MODEL_CATALOG:
         return MODEL_CATALOG[model]["provider"]
+    if model.startswith("claude") or "anthropic" in model:
+        return PROVIDER_ANTHROPIC
     if model.startswith("gemini"):
         return PROVIDER_GEMINI
     if model.startswith("gpt"):
         return PROVIDER_OPENAI
-    return PROVIDER_GEMINI  # default
+    return PROVIDER_ANTHROPIC  # default
 
 
 def get_api_model_name(model: str) -> str:
@@ -71,7 +83,9 @@ async def llm_generate(
 
     logger.debug(f"LLM call: provider={provider}, model={api_model}")
 
-    if provider == PROVIDER_GEMINI:
+    if provider == PROVIDER_ANTHROPIC:
+        return await _call_anthropic(prompt, system_prompt, api_model, temperature, max_tokens, json_mode)
+    elif provider == PROVIDER_GEMINI:
         return await _call_gemini(prompt, system_prompt, api_model, temperature, max_tokens)
     elif provider == PROVIDER_OPENAI:
         return await _call_openai(prompt, system_prompt, api_model, temperature, max_tokens, json_mode)
@@ -87,13 +101,58 @@ async def llm_embed(texts: list[str], model: str | None = None) -> list[list[flo
     settings = get_settings()
     embed_model = model or settings.embedding_model
 
-    if embed_model.startswith("text-embedding"):
-        return await _embed_openai(texts, embed_model)
-    elif "embedding" in embed_model.lower() or embed_model.startswith("models/"):
+    # Gemini native format: "models/text-embedding-004"
+    if embed_model.startswith("models/"):
         return await _embed_gemini(texts, embed_model)
-    else:
-        # Default to Gemini embedding
-        return await _embed_gemini(texts, "models/text-embedding-004")
+    # Everything else routes through OpenAI-compatible endpoint (works for
+    # OpenAI direct, and PwC gateway which serves azure.*/vertex_ai.*/bedrock.*
+    # embedding models via OpenAI-compatible protocol).
+    return await _embed_openai(texts, embed_model)
+
+
+# ─── Anthropic Provider ───────────────────────────────────────────────────────
+
+async def _call_anthropic(
+    prompt: str,
+    system_prompt: str,
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    json_mode: bool,
+) -> str:
+    """Call Anthropic Claude (via official SDK, optionally through a proxy base_url)."""
+    settings = get_settings()
+
+    if not settings.anthropic_api_key:
+        logger.warning("No Anthropic API key configured")
+        return "[]"
+
+    try:
+        from anthropic import AsyncAnthropic
+
+        client_kwargs = {"api_key": settings.anthropic_api_key}
+        if settings.anthropic_base_url:
+            client_kwargs["base_url"] = settings.anthropic_base_url
+        client = AsyncAnthropic(**client_kwargs)
+
+        effective_system = system_prompt
+        if json_mode:
+            json_instruction = "Respond with valid JSON only. No prose, no markdown code fences."
+            effective_system = f"{system_prompt}\n\n{json_instruction}".strip() if system_prompt else json_instruction
+
+        response = await client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=effective_system,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        text = "".join(b.text for b in response.content if getattr(b, "type", None) == "text")
+        return text or "[]"
+
+    except Exception as e:
+        logger.error(f"Anthropic API call failed: {e}")
+        raise
 
 
 # ─── Gemini Provider ──────────────────────────────────────────────────────────
@@ -183,7 +242,7 @@ async def _call_openai(
     max_tokens: int,
     json_mode: bool,
 ) -> str:
-    """Call OpenAI API."""
+    """Call OpenAI API (or OpenAI-compatible gateway via base_url)."""
     settings = get_settings()
 
     if not settings.openai_api_key:
@@ -192,7 +251,10 @@ async def _call_openai(
 
     try:
         from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        client_kwargs = {"api_key": settings.openai_api_key}
+        if settings.openai_base_url:
+            client_kwargs["base_url"] = settings.openai_base_url
+        client = AsyncOpenAI(**client_kwargs)
 
         messages = []
         if system_prompt:
@@ -218,15 +280,19 @@ async def _call_openai(
 
 
 async def _embed_openai(texts: list[str], model: str) -> list[list[float]]:
-    """Get embeddings from OpenAI API."""
+    """Get embeddings from OpenAI API (or OpenAI-compatible gateway via base_url)."""
     settings = get_settings()
 
     if not settings.openai_api_key:
+        logger.warning("No OpenAI API key — falling back to pseudo-embeddings")
         return [_pseudo_embedding(t) for t in texts]
 
     try:
         from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        client_kwargs = {"api_key": settings.openai_api_key}
+        if settings.openai_base_url:
+            client_kwargs["base_url"] = settings.openai_base_url
+        client = AsyncOpenAI(**client_kwargs)
 
         all_embeddings = []
         for i in range(0, len(texts), 100):
@@ -280,4 +346,4 @@ def _pseudo_embedding(text: str) -> list[float]:
 def has_api_key() -> bool:
     """Check if any API key is configured."""
     settings = get_settings()
-    return bool(settings.google_api_key or settings.openai_api_key)
+    return bool(settings.anthropic_api_key or settings.google_api_key or settings.openai_api_key)

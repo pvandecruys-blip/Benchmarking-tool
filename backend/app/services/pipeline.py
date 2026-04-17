@@ -15,7 +15,7 @@ from app.services.pptx_parser import parse_pptx
 from app.services.document_parser import parse_document
 from app.services.bibliography import extract_bibliography
 from app.services.chunker import chunk_document
-from app.services.vector_store import get_vector_store
+from app.services.vector_store import get_vector_store, hybrid_rerank
 from app.services.metric_extractor import extract_metrics_from_slide
 from app.services.verifier import verify_metric
 from app.services.citation_tracer import trace_citation_chain
@@ -159,9 +159,27 @@ async def run_analysis_pipeline(project_id: str):
         _log(project, f"Starting verification of {len(all_metrics)} metrics...", "🔍")
 
         for i, metric in enumerate(all_metrics):
-            # 2a. Semantic search
-            query = f"{metric.extracted_metric.description}: {metric.extracted_metric.context_sentence}"
-            relevant_chunks = store.query(query, n_results=get_settings().max_chunks_per_query)
+            # 2a. Hybrid retrieval: vector search + keyword boost on numeric
+            # tokens from the metric. Overfetch from the vector store, then
+            # re-rank so chunks that literally contain the metric's numbers
+            # surface above pure semantic matches that miss the figure.
+            cfg = get_settings()
+            top_k = cfg.max_chunks_per_query
+            overfetch = max(top_k * cfg.retrieval_overfetch_factor, top_k)
+
+            query = (
+                f"{metric.extracted_metric.description} "
+                f"{metric.extracted_metric.value} "
+                f"{metric.extracted_metric.context_sentence}"
+            )
+            raw_chunks = store.query(query, n_results=overfetch)
+            relevant_chunks = hybrid_rerank(
+                raw_chunks,
+                metric_value=metric.extracted_metric.value,
+                metric_description=metric.extracted_metric.description,
+                context_sentence=metric.extracted_metric.context_sentence,
+                n_results=top_k,
+            )
 
             # 2b. LLM verification
             verification = await verify_metric(metric, relevant_chunks, project.source_documents)
