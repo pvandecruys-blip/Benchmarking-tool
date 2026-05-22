@@ -137,3 +137,39 @@ export interface AppConfig {
   demo_mode: boolean;
   available_models: Record<string, { label: string; provider: string; cost_tier: string }>;
 }
+
+// ──────────────────────────────────────────────────────────────────
+// Parser output types (Phase 2: in-browser document parsing)
+// Mirrors backend/app/models.py SlideRecord/SlideShape and the dict
+// shape returned by document_parser.py.
+// ──────────────────────────────────────────────────────────────────
+
+export interface SlideShape {
+  shape_id: number;
+  shape_name: string;
+  text: string;
+  table: string[][] | null;
+}
+
+export interface SlideRecord {
+  slide_number: number;
+  slide_title: string;
+  slide_id: string;
+  shapes: SlideShape[];
+  all_text: string;
+  excluded: boolean;
+}
+
+export interface ParsedPresentation {
+  filename: string;
+  size_bytes: number;
+  slides: SlideRecord[];
+}
+
+export interface ParsedDocument {
+  filename: string;
+  size_bytes: number;
+  text: string;
+  pages: string[];
+  page_count: number;
+}
