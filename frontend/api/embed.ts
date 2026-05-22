@@ -1,50 +1,76 @@
 // Vercel serverless function — embeddings proxy.
-// Phase 1: stub. Returns deterministic hashed pseudo-vectors so downstream code can
-// be built and tested without an API key. Phase 4 will swap in OpenAI's
-// text-embedding-3-small (1536 dims) and add rate limiting.
+// Calls OpenAI's text-embedding-3-small (1536 dims, cheap: $0.02 per 1M tokens).
+// Anthropic does not offer an embeddings endpoint — that's why this one is
+// OpenAI-only even though /api/llm uses Anthropic.
+
+import OpenAI from 'openai';
 
 export const config = { runtime: 'nodejs' };
 
-const STUB_DIM = 16;
+const MAX_TEXTS_PER_CALL = 96;
+const MAX_TOTAL_CHARS = 200_000;
+const DEFAULT_MODEL = 'text-embedding-3-small';
 
 interface EmbedRequest {
   texts: string[];
   model?: string;
 }
 
-function hashStringToVector(s: string, dim: number): number[] {
-  const v = new Array<number>(dim).fill(0);
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    v[i % dim] = (v[i % dim] + c * (1 + (i % 7))) % 9973;
-  }
-  const norm = Math.sqrt(v.reduce((a, b) => a + b * b, 0)) || 1;
-  return v.map((x) => x / norm);
+function err(status: number, message: string): Response {
+  return Response.json({ error: message }, { status });
 }
 
 export default async function handler(req: Request): Promise<Response> {
-  if (req.method !== 'POST') {
-    return Response.json({ error: 'Method not allowed' }, { status: 405 });
-  }
+  if (req.method !== 'POST') return err(405, 'Method not allowed');
 
   let body: EmbedRequest;
   try {
     body = (await req.json()) as EmbedRequest;
   } catch {
-    return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return err(400, 'Invalid JSON body');
   }
 
   if (!Array.isArray(body.texts) || body.texts.some((t) => typeof t !== 'string')) {
-    return Response.json({ error: 'texts must be an array of strings' }, { status: 400 });
+    return err(400, 'texts must be an array of strings');
   }
-  if (body.texts.length > 96) {
-    return Response.json({ error: 'max 96 texts per call' }, { status: 400 });
+  if (body.texts.length === 0) return err(400, 'texts is empty');
+  if (body.texts.length > MAX_TEXTS_PER_CALL) {
+    return err(413, `max ${MAX_TEXTS_PER_CALL} texts per call`);
+  }
+  const totalChars = body.texts.reduce((a, t) => a + t.length, 0);
+  if (totalChars > MAX_TOTAL_CHARS) {
+    return err(413, `combined texts exceed ${MAX_TOTAL_CHARS} chars`);
   }
 
-  return Response.json({
-    stub: true,
-    model: body.model ?? 'stub-hash-16',
-    dim: STUB_DIM,
-    vectors: body.texts.map((t) => hashStringToVector(t, STUB_DIM)),
-  });
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return err(503, 'Server is not configured: OPENAI_API_KEY missing');
+  }
+
+  const client = new OpenAI({ apiKey });
+
+  try {
+    const resp = await client.embeddings.create({
+      model: body.model ?? DEFAULT_MODEL,
+      input: body.texts,
+    });
+
+    const vectors = resp.data
+      .sort((a, b) => a.index - b.index)
+      .map((d) => d.embedding);
+
+    return Response.json({
+      model: resp.model,
+      dim: vectors[0]?.length ?? 0,
+      vectors,
+      usage: { prompt_tokens: resp.usage.prompt_tokens, total_tokens: resp.usage.total_tokens },
+    });
+  } catch (e) {
+    const status =
+      typeof e === 'object' && e !== null && 'status' in e
+        ? (e as { status: number }).status
+        : 500;
+    const message = e instanceof Error ? e.message : 'Unknown embeddings error';
+    return Response.json({ error: message }, { status });
+  }
 }
