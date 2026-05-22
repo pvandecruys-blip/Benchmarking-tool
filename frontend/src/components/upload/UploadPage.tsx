@@ -1,9 +1,9 @@
 import { useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Upload, FileText, X, ChevronDown, Sparkles } from 'lucide-react';
+import { Upload, FileText, X, Sparkles } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { api } from '../../lib/api';
-import type { DocumentType, SourceDoc } from '../../lib/types';
+import type { DocumentType } from '../../lib/types';
 
 const DOC_TYPES: { value: DocumentType; label: string }[] = [
   { value: 'deep_research_report', label: 'Deep Research Report' },
@@ -20,7 +20,6 @@ export default function UploadPage() {
     projectId, setProject, setView,
     presentationInfo, setPresentationInfo,
     sourceDocs, addSourceDoc, removeSourceDoc,
-    setProcessingStatus,
   } = useStore();
 
   const [loading, setLoading] = useState(false);

@@ -1,0 +1,37 @@
+# Vercel deploy: ship only the frontend + top-level api/
+# Everything below is excluded from the deploy upload.
+
+# Python backend (kept in repo for local dev / reference, not deployed)
+backend/
+
+# Local dev artifacts
+node_modules/
+**/node_modules/
+**/__pycache__/
+**/venv/
+**/env/
+
+# Local data
+**/data/
+**/uploads/
+**/outputs/
+**/chromadb/
+
+# Large media that should never reach the deploy
+*.mp4
+*.mov
+*.mkv
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local env files (real env vars come from Vercel project settings)
+.env
+.env.*
+!.env.example
+
+# Plans / scratch
+.claude/

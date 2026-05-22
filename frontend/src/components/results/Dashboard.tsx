@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Download, ChevronRight, X, Star, Filter, ExternalLink } from 'lucide-react';
+import { Download, ChevronRight, X } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { api } from '../../lib/api';
 import type { MetricRecord, VerificationStatus } from '../../lib/types';
@@ -315,5 +315,3 @@ function DetailPanel({ metric, onClose }: { metric: MetricRecord; onClose: () =>
     </div>
   );
 }
-
-const STATUS_CONFIG_DETAIL = STATUS_CONFIG;

@@ -26,6 +26,11 @@ test_files/
 Thumbs.db
 *.swp
 
+# Large media (screen recordings etc.)
+*.mp4
+*.mov
+*.mkv
+
 # IDE
 .vscode/
 .idea/

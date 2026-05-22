@@ -1,7 +1,7 @@
 // SourceLens State Management — Zustand Store
 
 import { create } from 'zustand';
-import type { ProjectSummary, MetricRecord, AuditSummary, ProcessingStatus, SlidePreview, SourceDoc, AppConfig } from '../lib/types';
+import type { MetricRecord, AuditSummary, ProcessingStatus, SlidePreview, SourceDoc, AppConfig } from '../lib/types';
 
 type AppView = 'upload' | 'processing' | 'results';
 
